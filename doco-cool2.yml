@@ -1,0 +1,84 @@
+services:
+  redis:
+    image: redis:8.6.2-alpine
+    container_name: omniroute-redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - omniroute-network
+
+  omniroute:
+    image: diegosouzapw/omniroute:latest
+    container_name: omniroute
+    restart: unless-stopped
+    stop_grace_period: 40s
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - JWT_SECRET=${JWT_SECRET}
+      - API_KEY_SECRET=${API_KEY_SECRET}
+      - STORAGE_ENCRYPTION_KEY=${STORAGE_ENCRYPTION_KEY}
+      - STORAGE_ENCRYPTION_KEY_VERSION=v1
+      - MACHINE_ID_SALT=${MACHINE_ID_SALT}
+      - OMNIROUTE_WS_BRIDGE_SECRET=${OMNIROUTE_WS_BRIDGE_SECRET}
+      - INITIAL_PASSWORD=${INITIAL_PASSWORD}
+      - NODE_ENV=production
+      - PORT=20128
+      - HOSTNAME=0.0.0.0
+      - DATA_DIR=/app/data
+      - CONTAINER_HOST=docker
+      - AUTH_COOKIE_SECURE=${AUTH_COOKIE_SECURE}
+      - REQUIRE_API_KEY=${REQUIRE_API_KEY}
+      - ALLOW_API_KEY_REVEAL=${ALLOW_API_KEY_REVEAL}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - DISABLE_SQLITE_AUTO_BACKUP=false
+      - BASE_URL=http://omniroute:20128
+      - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL}
+      - OMNIROUTE_PUBLIC_PROTOCOL=https
+      - OMNIROUTE_ALLOW_PRIVATE_PROVIDER_URLS=${OMNIROUTE_ALLOW_PRIVATE_PROVIDER_URLS}
+      - OMNIROUTE_ALLOW_LOCAL_PROVIDER_URLS=${OMNIROUTE_ALLOW_LOCAL_PROVIDER_URLS}
+      - INPUT_SANITIZER_ENABLED=${INPUT_SANITIZER_ENABLED}
+      - INPUT_SANITIZER_MODE=${INPUT_SANITIZER_MODE}
+      - PII_REDACTION_ENABLED=${PII_REDACTION_ENABLED}
+      - PII_RESPONSE_SANITIZATION=${PII_RESPONSE_SANITIZATION}
+      - RELAY_IP_PER_MINUTE=${RELAY_IP_PER_MINUTE}
+      - APP_LOG_TO_FILE=${APP_LOG_TO_FILE}
+      - OMNIROUTE_PROXY_FETCH_DEBUG=${OMNIROUTE_PROXY_FETCH_DEBUG}
+      - OMNIROUTE_USE_TURBOPACK=${OMNIROUTE_USE_TURBOPACK}
+    volumes:
+      - omniroute-data:/app/data
+    ports:
+     - "20128:20128"  
+    healthcheck:
+      test: ["CMD", "node", "healthcheck.mjs"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    labels:
+      - coolify.managed=true
+      - coolify.appName=omniroute
+    networks:
+      - omniroute-network
+
+volumes:
+  omniroute-data:
+    name: omniroute-data
+    driver: local
+  redis-data:
+    name: omniroute-redis-data
+    driver: local
+
+networks:
+  omniroute-network:
+    name: omniroute-network
+    driver: bridge
