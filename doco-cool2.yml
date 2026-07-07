@@ -9,7 +9,7 @@ services:
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
-      timeout: 5s
+      timeout: 30s
       retries: 3
       start_period: 5s
     networks:
@@ -61,7 +61,7 @@ services:
     healthcheck:
       test: ["CMD", "node", "healthcheck.mjs"]
       interval: 30s
-      timeout: 5s
+      timeout: 35s
       retries: 3
       start_period: 60s
     labels:
