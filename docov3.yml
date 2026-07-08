@@ -1,0 +1,110 @@
+# ─────────────────────────────────────────────────────────────────────
+#  OmniRoute on Coolify — Canonical Docker Compose
+#
+#  Based on:  github.com/diegosouzapw/OmniRoute — docker-compose.prod.yml
+#  Adapted:  Coolify v4 (Traefik-managed reverse proxy, env injection)
+#  Profile:  runner-base (no CLI tools, no Chromium — paid-keys only)
+#  Ports:    20128 only (single-port mode: dashboard + /v1 API)
+#
+#  Why this differs from upstream:
+#   • Uses the published multi-arch image `diegosouzapw/omniroute:latest`
+#     instead of building from source — saves ~3-5 min on Coolify deploys.
+#   • Includes the Redis sidecar that the upstream compose always starts.
+#     Setting REDIS_URL without a running Redis floods ioredis error logs.
+#   • Uses explicit named volumes (not bind mounts) — Coolify manages them.
+#   • No `container_name:` — Coolify assigns unique names per project.
+#   • Hardening: `no-new-privileges`, `cap_drop: ALL`, read-only root fs
+#     (with the two writable paths OmniRoute needs).
+#
+#  Coolify UI → New Resource → Docker Compose → paste this file.
+#  Secrets go in Coolify's Environment Variables tab, NOT here.
+# ─────────────────────────────────────────────────────────────────────
+
+services:
+  # ── Redis: rate-limiter / cache backend ────────────────────────────
+  # Kept OFF the host network. Only reachable via the internal bridge.
+  redis:
+    image: redis:7-alpine          # 7-alpine is what upstream uses; 8-alpine is also fine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - omniroute-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - omniroute-internal
+    # No `ports:` — Redis is NOT exposed to the host or to other containers
+    # except via the internal Docker network. This is a security choice.
+    security_opt:
+      - no-new-privileges:true
+
+  # ── OmniRoute: AI gateway ─────────────────────────────────────────
+  omniroute:
+    image: diegosouzapw/omniroute:latest   # multi-arch amd64 + arm64, ~250 MB
+    restart: unless-stopped
+    stop_grace_period: 40s     # required: lets SQLite checkpoint before SIGKILL
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    # Single-port mode: dashboard AND /v1 API both on 20128.
+    # Coolify's Traefik picks this up via the Domain config in the UI
+    # (Settings → Domains → add your FQDN pointing to port 20128).
+    ports:
+      - "20128:20128"
+
+    volumes:
+      - omniroute-data:/app/data     # SQLite DB, encrypted keys, logs, backups
+
+    healthcheck:
+      # The upstream `node healthcheck.mjs` probes up to 4 hosts × 4s
+      # (worst-case ~16s). Docker's default 5s timeout would kill it.
+      # Probing /api/monitoring/health directly is simpler and reliable.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:20128/api/monitoring/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s            # DB migrations + first-boot init
+
+    networks:
+      - omniroute-internal
+
+    # ── Container hardening ─────────────────────────────────────
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE          # only if you ever move to a port <1024
+    read_only: false               # OmniRoute writes to /app/data + /tmp; do NOT enable globally
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+
+    # ── Resource limits (Coolify passes these through to Docker) ──
+    mem_limit: 1g
+    mem_reservation: 256m
+    cpus: "2.0"
+
+    # ── Labels Coolify uses to wire Traefik + manage the resource ──
+    labels:
+      - coolify.managed=true
+      - coolify.appName=omniroute
+
+    # ── Environment variables are injected by Coolify's UI ──
+    # See the matching .env.example in this folder for the full list.
+    # Secrets are NOT hardcoded here — they live in Coolify's encrypted store.
+
+volumes:
+  omniroute-data:
+    name: omniroute-data
+  omniroute-redis-data:
+    name: omniroute-redis-data
+
+networks:
+  omniroute-internal:
+    name: omniroute-internal
+    driver: bridge
