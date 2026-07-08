@@ -61,14 +61,11 @@ services:
       - omniroute-data:/app/data     # SQLite DB, encrypted keys, logs, backups
 
     healthcheck:
-      # The upstream `node healthcheck.mjs` probes up to 4 hosts × 4s
-      # (worst-case ~16s). Docker's default 5s timeout would kill it.
-      # Probing /api/monitoring/health directly is simpler and reliable.
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:20128/api/monitoring/health"]
+      test: ["CMD", "node", "healthcheck.mjs"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 90s            # DB migrations + first-boot init
+      start_period: 90s
 
     networks:
       - omniroute-internal
